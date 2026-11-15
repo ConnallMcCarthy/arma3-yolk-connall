@@ -1,6 +1,6 @@
-# Steam diagnostics testing image
+# Steam diagnostics
 
-Use `ghcr.io/connallmccarthy/arma3-yolk-connall:testing`.
+Use `ghcr.io/connallmccarthy/arma-3-yolk-connall:latest`.
 
 Every startup prints a `[STEAM_DIAG]` block before launching Arma. It reports:
 
