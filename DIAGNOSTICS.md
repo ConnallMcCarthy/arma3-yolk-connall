@@ -6,9 +6,9 @@ Every startup prints a `[STEAM_DIAG]` block before launching Arma. It reports:
 
 - The runtime `steam_appid.txt` value and the expected value, `107410`.
 - Existing `SteamAppId` and `SteamGameId` environment overrides.
-- Resolved paths and SHA-256 hashes for bundled `steamclient.so` / `libsteam_api.so`, local, SDK, and SteamCMD library candidates, selecting 32/64-bit paths from SERVER_BINARY.
+- Resolved paths and SHA-256 hashes for local, SDK, and SteamCMD `steamclient.so` candidates, selecting 32/64-bit paths from SERVER_BINARY.
 
-The checks do not write files, change environment variables, replace libraries, log in to Steam, or alter startup options. Missing files or diagnostic failures do not block server startup. Candidate paths/hashes alone do not establish which library Arma loaded. Different hashes warrant investigation; they do not establish incompatibility. The supplied live process map shows Arma using `/home/container/linux64/steamclient.so` and `/home/container/linux64/libsteam_api.so`; a stale SDK copy is not established as the cause of those warnings.
+The checks do not write files, change environment variables, replace libraries, log in to Steam, or alter startup options. Missing files or diagnostic failures do not block server startup. Candidate paths/hashes alone do not establish which library Arma loaded. Different hashes warrant investigation; they do not establish incompatibility.
 
 An admin shell inside the running container can inspect the libraries actually mapped by an Arma process:
 

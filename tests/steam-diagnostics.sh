@@ -5,7 +5,7 @@ testRoot=$(mktemp -d)
 sleeper=''
 trap '[[ -z "$sleeper" ]] || kill "$sleeper" 2>/dev/null; rm -rf "$testRoot"' EXIT
 export HOME="$testRoot/server home" SERVER_BINARY=arma3server_x64
-mkdir -p "$HOME/.steam/sdk64" "$HOME/steamcmd/linux64" "$HOME/linux64"
+mkdir -p "$HOME/.steam/sdk64" "$HOME/steamcmd/linux64"
 
 bash "$repo/steam-diagnostics.sh" > "$testRoot/diagnostics.log"
 grep -q 'Cannot read' "$testRoot/diagnostics.log"
@@ -13,20 +13,16 @@ grep -q 'Cannot read' "$testRoot/diagnostics.log"
 echo 'PASS: missing AppID/libraries are informational and no files are created'
 
 printf '107410\r\n' > "$HOME/steam_appid.txt"
-printf 'bundled Steam client fixture' > "$HOME/linux64/steamclient.so"
-printf 'bundled Steam API fixture' > "$HOME/linux64/libsteam_api.so"
 printf 'current SteamCMD fixture' > "$HOME/steamcmd/linux64/steamclient.so"
 printf 'older SDK fixture' > "$HOME/.steam/sdk64/steamclient.so"
 ln -s steamcmd/linux64/steamclient.so "$HOME/steamclient.so"
 export SteamAppId=107410
-before=$(sha256sum "$HOME/steam_appid.txt" "$HOME/steamclient.so" "$HOME/.steam/sdk64/steamclient.so" "$HOME/linux64/steamclient.so" "$HOME/linux64/libsteam_api.so")
+before=$(sha256sum "$HOME/steam_appid.txt" "$HOME/steamclient.so" "$HOME/.steam/sdk64/steamclient.so")
 bash "$repo/steam-diagnostics.sh" > "$testRoot/diagnostics.log"
 grep -q 'steam_appid.txt=107410' "$testRoot/diagnostics.log"
 grep -q 'environment SteamAppId=107410' "$testRoot/diagnostics.log"
-grep -Fq "$(sha256sum "$HOME/linux64/steamclient.so")" "$testRoot/diagnostics.log"
-grep -Fq "$(sha256sum "$HOME/linux64/libsteam_api.so")" "$testRoot/diagnostics.log"
-[[ $(grep -c 'sha256 ' "$testRoot/diagnostics.log") == 5 ]]
-[[ "$before" == "$(sha256sum "$HOME/steam_appid.txt" "$HOME/steamclient.so" "$HOME/.steam/sdk64/steamclient.so" "$HOME/linux64/steamclient.so" "$HOME/linux64/libsteam_api.so")" ]]
+[[ $(grep -c 'sha256 ' "$testRoot/diagnostics.log") == 3 ]]
+[[ "$before" == "$(sha256sum "$HOME/steam_appid.txt" "$HOME/steamclient.so" "$HOME/.steam/sdk64/steamclient.so")" ]]
 [[ -L "$HOME/steamclient.so" && "$SteamAppId" == 107410 ]]
 echo 'PASS: AppID, hashes and symlink targets reported without changing files or environment'
 
