@@ -24,7 +24,7 @@ if [[ "${SERVER_BINARY:-arma3server_x64}" != *x64* ]]; then
     sdk=sdk32
     platform=linux32
 fi
-for library in "${HOME}/steamclient.so" "${HOME}/.steam/${sdk}/steamclient.so" "${HOME}/steamcmd/${platform}/steamclient.so"; do
+for library in "${HOME}/${platform}/steamclient.so" "${HOME}/${platform}/libsteam_api.so" "${HOME}/steamclient.so" "${HOME}/.steam/${sdk}/steamclient.so" "${HOME}/steamcmd/${platform}/steamclient.so"; do
     if [[ -f "$library" && -r "$library" ]]; then
         printf '[STEAM_DIAG]: library %q -> %q\n' "$library" "$(readlink -f -- "$library")"
         printf '[STEAM_DIAG]: sha256 '
