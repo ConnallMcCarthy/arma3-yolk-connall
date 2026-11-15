@@ -32,7 +32,6 @@
 
 ## === CONSTANTS ===
 STEAMCMD_DIR="${HOME}/steamcmd"                 # SteamCMD's directory containing steamcmd.sh
-WORKSHOP_DIR="${HOME}/steamapps/workshop" # SteamCMD's directory containing workshop downloads CHANGED DUE TO NEW INSTALL DIR
 STEAMCMD_SCRIPT="${STEAMCMD_DIR}/runscript.txt" # Runscript file for SteamCMD (contains all commands SteamCMD will run)
 STEAMCMD_LOG="${STEAMCMD_DIR}/steamcmd.log"     # Log file for SteamCMD
 
@@ -61,6 +60,10 @@ mods=()
 
 # Parse named arguments
 while [[ $# -gt 0 ]]; do
+    if [[ "$1" != -- && "$1" == --* && $# -lt 2 ]]; then
+        echo "Missing value for $1" >&2
+        exit 1
+    fi
     case "$1" in
         --attempts)
             attempts=$2
@@ -127,15 +130,21 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [[ ! "$attempts" =~ ^[1-9][0-9]*$ ]]; then
+    echo 'SteamCMD attempts must be a positive integer.' >&2
+    exit 1
+fi
+betaID=${betaID:-public}
+
 ## === PREPARE STEAMCMD ===
 echo -e "\n${GREEN}[SteamCMD]: ${CYAN}Starting checks for all updates...${NC}"
 echo -e "\t(It is okay to ignore any \"SDL\", \"steamservice\", and \"thread priority\" errors during this process)"
 
 # Create or clear existing runscript file
-> ${STEAMCMD_SCRIPT}
+: > "${STEAMCMD_SCRIPT}" || exit 1
 
 if [[ "${windows}" == "1" ]]; then
-    echo "@sSteamCmdForcePlatformType windows" >> ${STEAMCMD_SCRIPT}
+    echo "@sSteamCmdForcePlatformType windows" >> "${STEAMCMD_SCRIPT}"
 fi
 
 # Set default credential if empty string is somehow passed
@@ -153,16 +162,16 @@ else
 fi
 
 if [[ "${steamworks}" == "1" ]]; then
-    echo "app_update 1007 ${validate}" >> ${STEAMCMD_SCRIPT}
+    echo "app_update 1007 ${validate}" >> "${STEAMCMD_SCRIPT}"
 fi
 
 if [[ -n ${hldsGame} ]]; then
-    echo "app_set_config 90 mod ${hldsGame}" >> ${STEAMCMD_SCRIPT}
+    echo "app_set_config 90 mod ${hldsGame}" >> "${STEAMCMD_SCRIPT}"
 fi
 
+beta="-beta ${betaID}" # Explicit public also switches back from a previously installed beta.
 if [[ ${betaID} != "public" ]]; then
     echo -e "\tDownload/Update of ${CYAN}\"${betaID}\" branch${NC} enabled."
-    beta="-beta ${betaID}"
     if [[ -n ${betaPass} ]]; then
         beta+=" -betapassword ${betaPass}"
     fi
@@ -170,81 +179,91 @@ fi
 
 if [[ -n "${appID}" ]]; then
     echo -e "\tChecking for ${CYAN}server${NC} updates with App ID: ${CYAN}${appID}${NC}"
-    echo "app_update ${appID} ${beta} ${validate}" >> ${STEAMCMD_SCRIPT}
+    echo "app_update ${appID} ${beta} ${validate}" >> "${STEAMCMD_SCRIPT}"
 else
     echo -e "${GREEN}[SteamCMD]: ${RED}App ID not specified! ${YELLOW}Unable to process download/update.${NC}"
     exit 1
 fi
 
 if [[ -n "${modsAppID}" && ${#mods[@]} -gt 0 ]]; then
-    echo -e "\tChecking the following ${CYAN}Workshop mod IDs${NC} for updates: ${mods[@]}"
+    echo -e "\tChecking the following ${CYAN}Workshop mod IDs${NC} for updates: ${mods[*]}"
     for modID in "${mods[@]}"; do
-        echo "workshop_download_item ${modsAppID} $modID" >> ${STEAMCMD_SCRIPT}
+        echo "workshop_download_item ${modsAppID} $modID" >> "${STEAMCMD_SCRIPT}"
     done
 fi
 
 
 # Debug: Print runscript contents
 echo -e "${GREEN}===== STEAMCMD SCRIPT =====${NC}"
-cat ${STEAMCMD_SCRIPT}
+cat "${STEAMCMD_SCRIPT}"
 echo -e "${GREEN}===========================${NC}"
 
-echo "quit" >> ${STEAMCMD_SCRIPT}
+echo "quit" >> "${STEAMCMD_SCRIPT}"
 
 # Clear previous SteamCMD log if present
 if [[ -f "${STEAMCMD_LOG}" ]]; then
-    rm -f "${STEAMCMD_LOG:?}"
+    : > "${STEAMCMD_LOG}" || exit 1
 fi
 
 updateAttempt=0
 # Loop for specified number of attempts
-while (( $updateAttempt < $attempts )); do
+while (( updateAttempt < attempts )); do
     # Increment attempt counter
     updateAttempt=$((updateAttempt+1))
 
     # Notify if not first attempt
-    if (( $updateAttempt > 1 )); then
+    if (( updateAttempt > 1 )); then
         echo -e "\t${YELLOW}Re-Attempting download/update in 3 seconds...${NC} (Attempt ${CYAN}${updateAttempt}${NC} of ${CYAN}${attempts}${NC})\n"
         sleep 3
     fi
 
+    # Inspect only this attempt while retaining the complete update log.
+    logStart=0
+    [[ ! -f "$STEAMCMD_LOG" ]] || logStart=$(wc -l < "$STEAMCMD_LOG")
+
     # Run SteamCMD with script file
-    ${STEAMCMD_DIR}/steamcmd.sh +force_install_dir ${installDir} +login "${user}" "${pass}" "${auth}" +runscript ${STEAMCMD_SCRIPT} | tee -a "${STEAMCMD_LOG}"
+    "${STEAMCMD_DIR}/steamcmd.sh" +force_install_dir "${installDir}" +login "${user}" "${pass}" "${auth}" +runscript "${STEAMCMD_SCRIPT}" | tee -a "${STEAMCMD_LOG}"
     # echo -e "Running SteamCMD..."
 
     # Error checking for SteamCMD
-    steamcmdExitCode=${PIPESTATUS[0]}
-    loggedErrors=$(grep -i "error\|failed" "${STEAMCMD_LOG}" | grep -iv "setlocal\|SDL\|steamservice\|thread priority\|libcurl")
+    steamcmdStatus=("${PIPESTATUS[@]}")
+    steamcmdExitCode=${steamcmdStatus[0]}
+    if (( steamcmdStatus[1] != 0 )); then
+        echo '[SteamCMD]: Failed to write update log.' >&2
+        exit "${steamcmdStatus[1]}"
+    fi
+    attemptOutput=$(tail -n "+$((logStart+1))" "$STEAMCMD_LOG")
+    loggedErrors=$(grep -i "error\|failed" <<< "$attemptOutput" | grep -iv "setlocal\|SDL\|steamservice\|thread priority\|libcurl")
     if [[ -n ${loggedErrors} ]]; then # Catch errors (ignore setlocale, SDL, steamservice, thread priority, and libcurl warnings)
         # Soft errors
-        if [[ -n $(grep -i "Timeout downloading item" "${STEAMCMD_LOG}") ]]; then # Mod download timeout
+        if grep -qi "Timeout downloading item" <<< "$attemptOutput"; then # Mod download timeout
             echo -e "\n${YELLOW}[SteamCMD]: ${NC}A Steam Workshop mod timed out while downloading."
             echo -e "\t(This is expected for large mods that are multiple gigabytes in size)"
-        elif [[ -n $(grep -i "0x402\|0x6\|0x602" "${STEAMCMD_LOG}") ]]; then # Connection issue with Steam
+        elif grep -qi "0x402\|0x6\|0x602" <<< "$attemptOutput"; then # Connection issue with Steam
             echo -e "\n${YELLOW}[SteamCMD]: ${NC}Connection issue with Steam servers."
             echo -e "\t(Steam servers may currently be down, or a connection cannot be made reliably)"
         # Fatal errors
-        elif [[ -n $(grep -i "Password check for AppId" "${STEAMCMD_LOG}") ]]; then # Incorrect beta branch password
+        elif grep -qi "Password check for AppId" <<< "$attemptOutput"; then # Incorrect beta branch password
             echo -e "\n${RED}[SteamCMD]: Incorrect password given for beta branch \"${betaID}\"${NC}"
             exit 1
-        elif [[ -n $(grep -i "Invalid Password\|two-factor\|No subscription" "${STEAMCMD_LOG}") ]]; then # Wrong username/password, Steam Guard is turned on, or host is using anonymous account
+        elif grep -qi "Invalid Password\|two-factor\|No subscription" <<< "$attemptOutput"; then # Wrong username/password, Steam Guard is turned on, or host is using anonymous account
             echo -e "\n${RED}[SteamCMD]: Cannot login to Steam - Improperly configured account and/or credentials${NC}"
             echo -e "\t${YELLOW}Please contact your administrator/host and give them the following message:${NC}"
             echo -e "\t${CYAN}Your Egg, or your client's server, is not configured with valid Steam credentials.${NC}"
             echo -e "\t${CYAN}Either the username/password is wrong, or Steam Guard is not fully disabled${NC}"
             echo -e "\t${CYAN}in accordance to this Egg's documentation/README.${NC}\n"
             exit 1
-        elif [[ -n $(grep -i "Download item" "${STEAMCMD_LOG}") ]]; then # Steam account does not own base game for mod downloads, or unknown
+        elif grep -qi "Download item" <<< "$attemptOutput"; then # Steam account does not own base game for mod downloads, or unknown
             echo -e "\n${RED}[SteamCMD]: Unknown Steam Workshop mod download error${NC}"
             echo -e "\t${YELLOW}While unknown, this error may be due to your host's Steam account not owning the base game.${NC}"
             echo -e "\t${YELLOW}(Please contact your administrator/host if this issue persists)${NC}\n"
             exit 1
-        elif [[ -n $(grep -i "0x202\|0x212" "${STEAMCMD_LOG}") ]]; then # Not enough disk space
+        elif grep -qi "0x202\|0x212" <<< "$attemptOutput"; then # Not enough disk space
             echo -e "\n${RED}[SteamCMD]: Unable to complete download - Not enough storage${NC}"
             echo -e "\t${YELLOW}You have run out of your allotted disk space.${NC}"
             echo -e "\t${YELLOW}Please contact your administrator/host for potential storage upgrades.${NC}\n"
             exit 1
-        elif [[ -n $(grep -i "0x606" "${STEAMCMD_LOG}") ]]; then # Disk write failure
+        elif grep -qi "0x606" <<< "$attemptOutput"; then # Disk write failure
             echo -e "\n${RED}[SteamCMD]: Unable to complete download - Disk write failure${NC}"
             echo -e "\t${YELLOW}This is normally caused by directory permissions issues,${NC}"
             echo -e "\t${YELLOW}but could be a more serious hardware issue.${NC}"
@@ -259,14 +278,14 @@ while (( $updateAttempt < $attempts )); do
     elif [[ $steamcmdExitCode != 0 ]]; then # Unknown fatal error
         echo -e "\n${RED}[UPDATE]: SteamCMD has crashed for an unknown reason!${NC} (Exit code: ${CYAN}${steamcmdExitCode}${NC})"
         echo -e "\t${YELLOW}(Please contact your administrator/host for support)${NC}\n"
-        cp -r /tmp/dumps ./dumps
-        exit $steamcmdExitCode
+        [[ ! -d /tmp/dumps ]] || cp -r /tmp/dumps ./dumps
+        exit "$steamcmdExitCode"
     else # Success!
         break
     fi
     
     # Notify if failed last attempt
-    if (( $updateAttempt == $attempts )); then
+    if (( updateAttempt == attempts )); then
         echo -e "\t${RED}Final attempt made! ${YELLOW}Unable to complete mod download/update. ${CYAN}Skipping...${NC}"
         echo -e "\t(You may try again later, or manually upload files to your server via SFTP)"
         exit 1
