@@ -74,7 +74,8 @@ assert_args "$HOME/server.argv" -par=startup_params_server.txt '-config=mission 
 grep -q 'fixture server output' "$HOME"/.local/share/'Arma 3'/rpt/*.rpt || fail 'console log lost'
 grep -q -- '-mod=@123;@mod with spaces;vn;' "$HOME/startup_params_server.txt" || fail 'mod list damaged'
 grep -q 'core-data/core.pbo' "$testRoot/last.log" || fail 'core symlink resolution missing'
-echo 'PASS: par mode, quoted custom paths, cwd, symlinks, mod list, console logging'
+grep -q '\[STEAM_DIAG_WARN\]: Cannot read' "$testRoot/last.log" || fail 'missing AppID diagnostics not emitted'
+echo 'PASS: par mode, quoted custom paths, cwd, symlinks, mod list, console logging, nonfatal diagnostics'
 export ARMA_DIRECT_ARGS=1 HC_NUM=1
 run_entrypoint 0
 serverOptions=()

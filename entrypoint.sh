@@ -414,6 +414,9 @@ if [[ ! -f basic.cfg ]]; then
     curl -fsSL "${BASIC_CFG_URL:-${BASIC_URL}}" -o ./basic.cfg || exit 1
 fi
 
+# Steam checks are read-only and must never prevent a working server from starting.
+/steam-diagnostics.sh || echo '[STEAM_DIAG_WARN]: Diagnostics could not complete; continuing startup.' >&2
+
 # Setup NSS Wrapper for use ($NSS_WRAPPER_PASSWD and $NSS_WRAPPER_GROUP have been set by the Dockerfile)
 USER_ID=$(id -u)
 GROUP_ID=$(id -g)
