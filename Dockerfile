@@ -13,6 +13,7 @@ RUN         dpkg --add-architecture i386 \
             && apt-get install -y \
                 # Basic packages
                 curl \
+                net-tools \
                 tzdata \
                 locales \
                 gettext-base \
@@ -57,7 +58,8 @@ WORKDIR     /home/container
 ## Copy over entrypoint.sh and set permissions
 COPY        --chown=container:container ./entrypoint.sh /entrypoint.sh
 COPY        --chown=container:container ./steamcmd.sh /steamcmd.sh
-RUN         chmod +x /entrypoint.sh /steamcmd.sh
+COPY        --chown=container:container ./steam-diagnostics.sh /steam-diagnostics.sh
+RUN         chmod +x /entrypoint.sh /steamcmd.sh /steam-diagnostics.sh
 
 ## Start with Tini to pass future stop signals correctly
 STOPSIGNAL  SIGINT

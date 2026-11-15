@@ -19,9 +19,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 ## === CONSTANTS ===
-STEAMCMD_DIR="${HOME}/steamcmd"                       # SteamCMD's directory containing steamcmd.sh
 WORKSHOP_DIR="${HOME}/steamapps/workshop"       # SteamCMD's directory containing workshop downloads CHANGED DUE TO NEW INSTALL DIR
-STEAMCMD_LOG="${STEAMCMD_DIR}/steamcmd.log"     # Log file for SteamCMD
 GAME_ID=107410                                  # SteamCMD ID for the Arma 3 GAME (not server). Only used for Workshop mod downloads.
 SERVER_PARAM_FILE="startup_params_server.txt"   # File name for the auto-generated server par file to be used during startup
 HC_PARAM_FILE="startup_params_hc.txt"           # File name for the auto-generated Headless Client par file to be used during startup
@@ -172,20 +170,19 @@ NC='\033[0m' # No Color
 # Takes a directory (string) as input, and recursively makes all files & folders lowercase.
 function ModsLowercase {
     echo -e "\tMaking mod ${CYAN}$1${NC} files/folders ${CYAN}lowercase${NC}..."
-    for SRC in `find ./$1 -depth`; do
-        DST=`dirname "${SRC}"`/`basename "${SRC}" | tr '[A-Z]' '[a-z]'`
+    while IFS= read -r -d '' SRC; do
+        DST=$(dirname "${SRC}")/$(basename "${SRC}" | tr '[:upper:]' '[:lower:]')
         if [ "${SRC}" != "${DST}" ]
         then
             [ ! -e "${DST}" ] && mv -T "${SRC}" "${DST}"
         fi
-    done
+    done < <(find "./$1" -depth -print0)
 }
 
 # Removes duplicate items from a semicolon delimited string
 function RemoveDuplicates { #[Input: str - Output: printf of new str]
-    if [[ -n $1 ]]; then # If nothing to compare, skip to prevent extra semicolon being returned
-        echo $1 | sed -e 's/;/\n/g' | sort -u | xargs printf '%s;'
-    fi
+    printf '%s\n' "${1:-}" | tr ';' '\n' | sed '/^$/d' | sort -u |
+        while IFS= read -r mod; do printf '%s;' "$mod"; done
 }
 
 ## === ENTRYPOINT START ===
@@ -194,7 +191,7 @@ function RemoveDuplicates { #[Input: str - Output: printf of new str]
 sleep 1
 
 # Switch to the container's working directory
-cd ${HOME} || exit 1
+cd "${HOME}" || exit 1
 
 # Check for old Eggs
 if [[ -z ${PARAM_NOLOGS+x} ]]; then # PARAM_NOLOGS was not in the previous version
@@ -211,8 +208,8 @@ if [[ -n ${MODIFICATIONS} ]] && [[ ${MODIFICATIONS} != *\; ]]; then # Add manual
 else
     clientMods=${MODIFICATIONS}
 fi
-if [[ -f ${MOD_FILE} ]] && [[ -n "$(cat ${MOD_FILE} | grep 'Created by Arma 3 Launcher')" ]]; then # If the mod list file exists and is valid, parse and add mods to the client-side mods list
-    clientMods+=$(cat ${MOD_FILE} | grep 'id=' | cut -d'=' -f3 | cut -d'"' -f1 | xargs printf '@%s;')
+if [[ -f ${MOD_FILE} ]] && grep -q 'Created by Arma 3 Launcher' "${MOD_FILE}"; then # If the mod list file exists and is valid, parse and add mods to the client-side mods list
+    clientMods+=$(cat "${MOD_FILE}" | grep 'id=' | cut -d'=' -f3 | cut -d'"' -f1 | xargs printf '@%s;')
 elif [[ -n "${MOD_FILE}" ]]; then # If MOD_FILE is not null, warn user file is missing or invalid
     echo -e "\n${YELLOW}[STARTUP_WARN]: Arma 3 Modlist file \"${CYAN}${MOD_FILE}${YELLOW}\" could not be found, or is invalid!${NC}"
     echo -e "\tEnsure your uploaded modlist's file name matches your Startup Parameter."
@@ -232,8 +229,8 @@ else
     allMods+=${OPTIONALMODS}
 fi
 allMods+=$clientMods # Add all client-side mods to the master mod list
-clientMods=$(RemoveDuplicates ${clientMods}) # Remove duplicate mods from clientMods, if present
-allMods=$(RemoveDuplicates ${allMods}) # Remove duplicate mods from allMods, if present
+clientMods=$(RemoveDuplicates "${clientMods}") # Remove duplicate mods from clientMods, if present
+allMods=$(RemoveDuplicates "${allMods}") # Remove duplicate mods from allMods, if present
 # allMods=$(echo $allMods | sed -e 's/;/ /g') # Convert from string to array OLD
 IFS=';' read -ra allMods <<< "${allMods}" # Convert from string to array NEW
 allWorkshopMods=()
@@ -262,15 +259,20 @@ if [[ ${UPDATE_SERVER} == 1 ]]; then
 
     # RunSteamCMD 0 ${STEAMCMD_APPID}
     /steamcmd.sh \
-        --attempts $STEAMCMD_ATTEMPTS \
-        --user ${STEAM_USER} \
-        --pass ${STEAM_PASS} \
-        --app-id ${STEAMCMD_APPID} \
-        --beta-id ${STEAMCMD_BETAID} \
+        --attempts "${STEAMCMD_ATTEMPTS}" \
+        --user "${STEAM_USER}" \
+        --pass "${STEAM_PASS}" \
+        --app-id "${STEAMCMD_APPID}" \
+        --beta-id "${STEAMCMD_BETAID}" \
         --add-redist "0" \
-        --validate ${VALIDATE_SERVER} \
-        --mods-app-id ${GAME_ID} \
-        -- $(echo ${allWorkshopMods[@]} | sed -e 's/@//g')
+        --validate "${VALIDATE_SERVER}" \
+        --mods-app-id "${GAME_ID}" \
+        -- "${allWorkshopMods[@]//@/}"
+    updateExitCode=$?
+    if (( updateExitCode != 0 )); then
+        echo -e "${RED}[STARTUP_ERR]: SteamCMD failed; refusing to launch after an incomplete update.${NC}"
+        exit "$updateExitCode"
+    fi
 
     ## Update mods
     # if [[ -n $allMods ]]; then
@@ -392,11 +394,11 @@ fi
 
 # Check if specified server binary exists.
 if [[ ! -f ${SERVER_BINARY} ]]; then
-    echo -e "\n${RED}[STARTUP_ERR]: Specified Arma 3 server binary could not be found in `$(pwd)`!${NC}"
+    echo -e "\n${RED}[STARTUP_ERR]: Specified Arma 3 server binary could not be found in $(pwd)!${NC}"
     echo -e "${YELLOW}Please do the following to resolve this issue:${NC}"
     echo -e "\t${CYAN}- Double check your \"Server Binary\" Startup Variable is correct.${NC}"
     echo -e "\t${CYAN}- Ensure your server has properly installed/updated without errors (reinstalling/updating again may help).${NC}"
-    echo -e "\t${CYAN}- Use the File Manager to check that your specified server binary file is not missing from `$(pwd)`.${NC}\n"
+    echo -e "\t${CYAN}- Use the File Manager to check that your specified server binary file is not missing from $(pwd).${NC}\n"
     exit 1
 fi
 
@@ -409,13 +411,17 @@ mkdir -p "${HOME}/.local/share/Arma 3/rpt"
 if [[ ! -f basic.cfg ]]; then
     echo -e "\n${YELLOW}[STARTUP_WARN]: Basic Network Configuration file \"${CYAN}basic.cfg${YELLOW}\" is missing!${NC}"
     echo -e "\t${YELLOW}Downloading default file for use instead...${NC}"
-    curl -sSL ${BASIC_URL} -o ./basic.cfg
+    curl -fsSL "${BASIC_CFG_URL:-${BASIC_URL}}" -o ./basic.cfg || exit 1
 fi
 
+# Steam checks are read-only and must never prevent a working server from starting.
+/steam-diagnostics.sh || echo '[STEAM_DIAG_WARN]: Diagnostics could not complete; continuing startup.' >&2
+
 # Setup NSS Wrapper for use ($NSS_WRAPPER_PASSWD and $NSS_WRAPPER_GROUP have been set by the Dockerfile)
-export USER_ID=$(id -u)
-export GROUP_ID=$(id -g)
-envsubst < /passwd.template > ${NSS_WRAPPER_PASSWD}
+USER_ID=$(id -u)
+GROUP_ID=$(id -g)
+export USER_ID GROUP_ID
+envsubst < /passwd.template > "${NSS_WRAPPER_PASSWD}" || exit 1
 
 if [[ ${SERVER_BINARY} == *"x64"* ]]; then # Check which libnss-wrapper architecture to run, based off the server binary name
     export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libnss_wrapper.so
@@ -424,7 +430,7 @@ else
 fi
 
 # Create server startup parameters config file
-cat > ${SERVER_PARAM_FILE} << EOF
+cat > "${SERVER_PARAM_FILE}" << EOF || exit 1
 // ********************************************************************
 // *                                                                  *
 // *    Server Startup Parameters Config File                         *
@@ -448,7 +454,7 @@ $( [[ "$PARAM_NOLOGS" == "1" ]] && echo "-noLogs" )
 EOF
 
 # Create HC startup parameters config file
-cat > ${HC_PARAM_FILE} << EOF
+cat > "${HC_PARAM_FILE}" << EOF || exit 1
 // ********************************************************************
 // *                                                                  *
 // *    Headless Client Startup Parameters Config File                *
@@ -466,36 +472,92 @@ $( [[ "$PARAM_FILEPATCHING" == "1" ]] && echo "-filePatching" )
 -limitFPS=${PARAM_LIMITFPS}
 EOF
 
-# Start Headless Clients if applicable
-if [[ ${HC_NUM} > 0 ]]; then
-    echo -e "\n${GREEN}[STARTUP]:${NC} Starting ${CYAN}${HC_NUM}${NC} Headless Client(s)."
-    for i in $(seq ${HC_NUM}); do
+# Keep the generated files for inspection and an identical-options -par/direct comparison.
+serverArgs=()
+while IFS= read -r arg; do
+    [[ -z "$arg" || "$arg" == //* ]] || serverArgs+=("$arg")
+done < "$SERVER_PARAM_FILE"
+hcArgs=()
+while IFS= read -r arg; do
+    [[ -z "$arg" || "$arg" == //* ]] || hcArgs+=("$arg")
+done < "$HC_PARAM_FILE"
+
+# Parse quotes before expanding panel variables, so values remain literal single arguments.
+startupFile=$(mktemp) || exit 1
+if ! printf '%s\n' "$STARTUP" | xargs -r printf '%s\0' > "$startupFile"; then
+    rm -f "$startupFile"
+    echo '[STARTUP_ERR]: Invalid quotes in STARTUP.' >&2
+    exit 1
+fi
+mapfile -d '' -t startupArgs < "$startupFile"
+rm -f "$startupFile"
+serverCommand=()
+# shellcheck disable=SC2016 # Match variable syntax literally.
+variablePattern='\{\{([a-zA-Z_][a-zA-Z_0-9]*)\}\}|\$\{([a-zA-Z_][a-zA-Z_0-9]*)\}|\$([a-zA-Z_][a-zA-Z_0-9]*)'
+for arg in "${startupArgs[@]}"; do
+    expanded=''
+    while [[ "$arg" =~ $variablePattern ]]; do
+        placeholder=${BASH_REMATCH[0]}
+        variable=${BASH_REMATCH[1]:-${BASH_REMATCH[2]:-${BASH_REMATCH[3]}}}
+        expanded+="${arg%%"$placeholder"*}${!variable}"
+        arg=${arg#*"$placeholder"}
+    done
+    arg="$expanded$arg"
+    if [[ "${ARMA_DIRECT_ARGS:-0}" == 1 && "$arg" == "-par=$SERVER_PARAM_FILE" ]]; then
+        serverCommand+=("${serverArgs[@]}")
+    else
+        serverCommand+=("$arg")
+    fi
+done
+if (( ${#serverCommand[@]} == 0 )); then
+    echo '[STARTUP_ERR]: STARTUP is empty.' >&2
+    exit 1
+fi
+
+# Log actual argv (shell-escaped), not a fictitious expansion of -par.
+printf '[STARTUP]: cwd=%q binary=%q direct_args=%s\n' "$PWD" "$(readlink -f -- "$SERVER_BINARY")" "${ARMA_DIRECT_ARGS:-0}"
+for path in dta/core.pbo addons mpmissions server.cfg basic.cfg; do
+    if [[ -r "$path" ]]; then
+        printf '[STARTUP]: readable %q -> %q\n' "$path" "$(readlink -f -- "$path")"
+    else
+        printf '[STARTUP_WARN]: unreadable from cwd: %q\n' "$path"
+    fi
+done
+printf '[STARTUP]: argv:'
+printf ' %q' "${serverCommand[@]}"
+printf '\n'
+printf '[STARTUP]: generated options (%s):\n' "$SERVER_PARAM_FILE"
+printf '  %q\n' "${serverArgs[@]}"
+
+# Start Headless Clients if applicable; use the same parameter transport as the server.
+if (( HC_NUM > 0 )); then
+    for ((i=1; i<=HC_NUM; i++)); do
+        hcCommand=("./${SERVER_BINARY}" "-par=${HC_PARAM_FILE}")
+        [[ "${ARMA_DIRECT_ARGS:-0}" != 1 ]] || hcCommand=("./${SERVER_BINARY}" "${hcArgs[@]}")
         if [[ ${HC_HIDE} == "1" ]]; then
-            ./${SERVER_BINARY} -par=${HC_PARAM_FILE} > /dev/null 2>&1 &
+            "${hcCommand[@]}" > /dev/null 2>&1 &
         else
-            ./${SERVER_BINARY} -par=${HC_PARAM_FILE} &
+            "${hcCommand[@]}" &
         fi
         echo -e "${GREEN}[STARTUP]:${CYAN} Headless Client $i${NC} launched."
     done
 fi
 
-# Replace Startup Command variables
-modifiedStartup=`eval echo $(echo ${STARTUP} | sed -e 's/{{/${/g' -e 's/}}/}/g')`
-# Convert PAR file to single-line string
-serverParams=$(sed '/^\/\//d' ${SERVER_PARAM_FILE} | tr '\n' ' ' | tr -s ' ')
-
-# Start the Server
-echo -e "\n${GREEN}[STARTUP]:${NC} Starting server with the following startup parameters:"
-echo -e "${CYAN}${modifiedStartup/-par=${SERVER_PARAM_FILE}/$serverParams}${NC}\n"
 if [[ "$PARAM_NOLOGS" == "1" ]]; then
-    ${modifiedStartup}
+    "${serverCommand[@]}"
+    exitCode=$?
 else
-    ${modifiedStartup} 2>&1 | tee -a "$logFile"
+    "${serverCommand[@]}" 2>&1 | tee -a "$logFile"
+    launchStatus=("${PIPESTATUS[@]}")
+    exitCode=${launchStatus[0]}
+    if (( launchStatus[1] != 0 )); then
+        echo '[SERVER_ERR]: Failed to write console log.' >&2
+        (( exitCode != 0 )) || exitCode=${launchStatus[1]}
+    fi
 fi
 
-# Check server exit code for errors
-exitCode=$?
-if [[ $exitCode -ne 0 && $exitCode -ne 130 ]]; then # Exit code 130 is SIGTERM
+if (( exitCode != 0 && exitCode != 130 )); then # 130 is SIGINT (the Docker stop signal).
     echo -e "\n${RED}[SERVER_ERR]: The server exited unexpectedly with code ${exitCode}!${NC}\n"
-    exit 1
+    exit "$exitCode"
 fi
+exit 0
